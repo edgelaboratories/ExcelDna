@@ -112,6 +112,8 @@ namespace ExcelDna.Integration.CustomUI
         }
     }
 
+    [Guid("6919fb08-d984-4d8d-b56f-1fec22c56617")]
+    [ProgId("EL.RiskAPI.TaskPane")]
     internal class ExcelCustomTaskPaneAddIn : ExcelComAddIn, ICustomTaskPaneConsumer
     {
         public ICTPFactory Factory;
