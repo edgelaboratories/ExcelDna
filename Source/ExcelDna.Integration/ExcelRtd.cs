@@ -130,7 +130,7 @@ namespace ExcelDna.Integration.Rtd
 
             // by making a fresh progId, we are sure Excel will try to load when we are ready.
             // Change from RtdSrv.xxx to RtdSrv_xxx to avoid McAfee bug that blocks registry writes with a "." anywhere
-            string progIdRegistered = "RtdSrv_" + clsId.ToString("N");
+            string progIdRegistered = "EL.RiskAPI.RTD";
             Debug.Print("RTD - Using ProgId: {0} for type: {1}", progIdRegistered, rtdServerType.FullName);
 
             try
