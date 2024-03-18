@@ -38,15 +38,15 @@ _COM_SMARTPTR_TYPEDEF(_Type, IID__Type);
 _COM_SMARTPTR_TYPEDEF(ICLRMetaHost, IID_ICLRMetaHost);
 _COM_SMARTPTR_TYPEDEF(ICLRRuntimeInfo, IID_ICLRRuntimeInfo);
 
-HRESULT LoadAppDomain(ICorRuntimeHostPtr pHost, std::wstring addInFullPath, bool createSandboxedAppDomain, bool shadowCopyFiles, _AssemblyPtr& loaderAssembly, _AppDomainPtr& addInAppDomain, bool& unloadAppDomain);
+HRESULT LoadAppDomain(ICorRuntimeHostPtr pHost, std::wstring addInFullPath, bool createSandboxedAppDomain, bool cancelAddInIsolation, bool shadowCopyFiles, _AssemblyPtr& loaderAssembly, _AppDomainPtr& addInAppDomain, bool& unloadAppDomain);
 HRESULT LoadLoaderIntoAppDomain(_AppDomainPtr& pAppDomain, _AssemblyPtr& pLoaderAssembly, bool forceFromBytes);
 void ShowMessage(int headerId, int bodyId, int footerId, HRESULT hr = S_OK);
 HRESULT CreateTempFile(void* pBuffer, DWORD nBufSize, std::wstring& fileName);
 HRESULT DeleteTempFile(std::wstring fileName);
 
-HRESULT GetClrOptions(std::wstring& clrVersion, bool& shadowCopyFiles, bool& createSandboxedAppDomain);
+HRESULT GetClrOptions(std::wstring& clrVersion, bool& shadowCopyFiles, bool& createSandboxedAppDomain, bool& cancelAddInIsolation);
 HRESULT GetDnaHeader(bool showErrors, std::wstring& header);
-HRESULT ParseDnaHeader(std::wstring header, std::wstring& addInName, std::wstring& runtimeVersion, bool& shadowCopyFiles, std::wstring& createSandboxedAppDomain);
+HRESULT ParseDnaHeader(std::wstring header, std::wstring& addInName, std::wstring& runtimeVersion, bool& shadowCopyFiles, std::wstring& createSandboxedAppDomain, bool& cancelAddInIsolation);
 HRESULT GetAttributeValue(std::wstring tag, std::wstring attributeName, std::wstring& attributeValue);
 
 BOOL IsRunningOnCluster();
@@ -87,8 +87,9 @@ bool XlLibraryInitialize(XlAddInExportInfo* pExportInfo)
 	std::wstring clrVersion;
 	bool shadowCopyFiles;
 	bool createSandboxedAppDomain;
+	bool cancelAddInIsolation;
 	
-	hr = GetClrOptions(clrVersion, shadowCopyFiles, createSandboxedAppDomain);
+	hr = GetClrOptions(clrVersion, shadowCopyFiles, createSandboxedAppDomain, cancelAddInIsolation);
 	if (FAILED(hr))
 	{
 		// SelectClrVersion shows diagnostic MessageBoxes if needed.
@@ -131,7 +132,7 @@ bool XlLibraryInitialize(XlAddInExportInfo* pExportInfo)
 	_AssemblyPtr pLoaderAssembly;
 	bool unloadAppDomain;
 
-	hr = LoadAppDomain(pHost, addInFullPath, createSandboxedAppDomain, shadowCopyFiles, pLoaderAssembly, pAppDomain, unloadAppDomain);
+	hr = LoadAppDomain(pHost, addInFullPath, createSandboxedAppDomain, cancelAddInIsolation, shadowCopyFiles, pLoaderAssembly, pAppDomain, unloadAppDomain);
 	if (FAILED(hr))
 	{
 		// Message already shown by LoadAppDomain
@@ -139,7 +140,7 @@ bool XlLibraryInitialize(XlAddInExportInfo* pExportInfo)
 	}
 
 	_TypePtr pXlAddInType;
-	hr = pLoaderAssembly->GetType_2(_bstr_t(L"ExcelDna.Loader.XlAddIn"), &pXlAddInType);
+	hr = pLoaderAssembly->GetType_2(_bstr_t(L"ExcelDna.ManagedHost.AddInInitialize"), &pXlAddInType);
 	if (FAILED(hr) || pXlAddInType == NULL)
 	{
 		ShowMessage(IDS_MSG_HEADER_APPDOMAIN, 
@@ -330,16 +331,16 @@ HRESULT LoadClrMeta(std::wstring clrVersion, ICLRMetaHost* pMetaHost, ICorRuntim
 	return hr;
 }
 
-HRESULT LoadAppDomain(ICorRuntimeHostPtr pHost, std::wstring addInFullPath, bool createSandboxedAppDomain, bool shadowCopyFiles, _AssemblyPtr& pLoaderAssembly , _AppDomainPtr& pAppDomain, bool& unloadAppDomain)
+HRESULT LoadAppDomain(ICorRuntimeHostPtr pHost, std::wstring addInFullPath, bool createSandboxedAppDomain, bool cancelAddInIsolation, bool shadowCopyFiles, _AssemblyPtr& pLoaderAssembly , _AppDomainPtr& pAppDomain, bool& unloadAppDomain)
 {
 	HRESULT hr;
 	std::wstring xllDirectory = addInFullPath;
 	RemoveFileSpecFromPath(xllDirectory);
 	unloadAppDomain = false;
 
-	if (IsRunningOnCluster())
+	if (cancelAddInIsolation || IsRunningOnCluster())
 	{
-		// Need to load into default AppDomain due to configuration issues of the cluster host.
+		// Need to load into default AppDomain
 		IUnknown *pAppDomainUnk = NULL;
 		hr = pHost->CurrentDomain(&pAppDomainUnk);
 		if (FAILED(hr) || pAppDomainUnk == NULL)
@@ -419,8 +420,12 @@ HRESULT LoadAppDomain(ICorRuntimeHostPtr pHost, std::wstring addInFullPath, bool
 			void* pConfig = LockResource(hConfig);
 			DWORD sizeConfig = SizeofResource(hModuleCurrent, hResConfig);
 
+			SafeByteArray configBytes(pConfig, sizeConfig);
+
+			byte* pConfigData;
+			int nConfigSize = configBytes.AccessData(&pConfigData);
 			std::wstring tempConfigFileName;
-			hr = CreateTempFile(pConfig, sizeConfig, tempConfigFileName);
+			hr = CreateTempFile(pConfigData, nConfigSize, tempConfigFileName);
 			if (SUCCEEDED(hr))
 			{
 				pAppDomainSetup->put_ConfigurationFile(_bstr_t(tempConfigFileName.c_str()));
@@ -456,7 +461,7 @@ HRESULT LoadAppDomain(ICorRuntimeHostPtr pHost, std::wstring addInFullPath, bool
 	if (createSandboxedAppDomain)
 	{
 		_TypePtr pAppDomainHelperType;
-		hr = pLoaderAssembly->GetType_2(_bstr_t(L"ExcelDna.Loader.AppDomainHelper"), &pAppDomainHelperType);
+		hr = pLoaderAssembly->GetType_2(_bstr_t(L"ExcelDna.ManagedHost.AppDomainHelper"), &pAppDomainHelperType);
 		if (FAILED(hr) || pAppDomainHelperType == NULL)
 		{
 			ShowMessage(IDS_MSG_HEADER_APPDOMAIN, 
@@ -507,13 +512,13 @@ HRESULT LoadLoaderIntoAppDomain(_AppDomainPtr& pAppDomain, _AssemblyPtr& pLoader
 	if (!forceFromBytes)
 	{
 		// Try regular load first 
-		hr = pAppDomain->Load_2(_bstr_t(L"ExcelDna.Loader"), &pLoaderAssembly);
+		hr = pAppDomain->Load_2(_bstr_t(L"ExcelDna.ManagedHost"), &pLoaderAssembly);
 	}
 
 	if (forceFromBytes || FAILED(hr) || pLoaderAssembly == NULL)
 	{
 		// Now try from resource bytes
-		HRSRC hResInfoLoader = FindResource(hModuleCurrent, L"EXCELDNA.LOADER", L"ASSEMBLY");
+		HRSRC hResInfoLoader = FindResource(hModuleCurrent, L"EXCELDNA.MANAGEDHOST", L"ASSEMBLY");
 		if (hResInfoLoader == NULL)
 		{
 			ShowMessage(IDS_MSG_HEADER_APPDOMAIN, 
@@ -524,8 +529,8 @@ HRESULT LoadLoaderIntoAppDomain(_AppDomainPtr& pAppDomain, _AssemblyPtr& pLoader
 		}
 		HGLOBAL hLoader = LoadResource(hModuleCurrent, hResInfoLoader);
 		void* pLoader = LockResource(hLoader);
-		ULONG sizeLoader = (ULONG)SizeofResource(hModuleCurrent, hResInfoLoader);
-		
+		DWORD sizeLoader = SizeofResource(hModuleCurrent, hResInfoLoader);
+
 		SafeByteArray loaderBytes(pLoader, sizeLoader);
 
 		hr = pAppDomain->Load_3(loaderBytes, &pLoaderAssembly);
@@ -727,11 +732,12 @@ HRESULT GetAddInName(std::wstring& addInName)
 	std::wstring clrVersion;
 	bool shadowCopyFiles;
 	std::wstring createSandboxedAppDomainValue;
+	bool cancelAddInIsolation;
 
 	hr = GetDnaHeader(false, header);	// Don't show errors here.
 	if (!FAILED(hr))
 	{
-		hr = ParseDnaHeader(header, addInName, clrVersion, shadowCopyFiles, createSandboxedAppDomainValue); // No errors yet.
+		hr = ParseDnaHeader(header, addInName, clrVersion, shadowCopyFiles, createSandboxedAppDomainValue, cancelAddInIsolation); // No errors yet.
 		if (FAILED(hr))
 		{
 			return E_FAIL;
@@ -755,7 +761,7 @@ HRESULT GetAddInName(std::wstring& addInName)
 //	"v2.0" -> "v2.0.50727"
 //	"v4.0" -> "v4.0.30319"
 
-HRESULT GetClrOptions(std::wstring& clrVersion, bool& shadowCopyFiles, bool& createSandboxedAppDomain)
+HRESULT GetClrOptions(std::wstring& clrVersion, bool& shadowCopyFiles, bool& createSandboxedAppDomain, bool& cancelAddInIsolation)
 {
 	HRESULT hr;
 	std::wstring header;
@@ -765,7 +771,7 @@ HRESULT GetClrOptions(std::wstring& clrVersion, bool& shadowCopyFiles, bool& cre
 	hr = GetDnaHeader(true, header);	// Errors will be shown in there.
 	if (!FAILED(hr))
 	{
-		hr = ParseDnaHeader(header, addInName, clrVersion, shadowCopyFiles, createSandboxedAppDomainValue); // No errors yet.
+		hr = ParseDnaHeader(header, addInName, clrVersion, shadowCopyFiles, createSandboxedAppDomainValue, cancelAddInIsolation); // No errors yet.
 		if (FAILED(hr))
 		{
 			// XML Parse error
@@ -802,7 +808,7 @@ HRESULT GetClrOptions(std::wstring& clrVersion, bool& shadowCopyFiles, bool& cre
 	return hr;
 }
 
-HRESULT ParseDnaHeader(std::wstring header, std::wstring& addInName, std::wstring& runtimeVersion, bool& shadowCopyFiles, std::wstring& createSandboxedAppDomain)
+HRESULT ParseDnaHeader(std::wstring header, std::wstring& addInName, std::wstring& runtimeVersion, bool& shadowCopyFiles, std::wstring& createSandboxedAppDomain, bool& cancelAddInIsolation)
 {
 	HRESULT hr;
 
@@ -865,6 +871,26 @@ HRESULT ParseDnaHeader(std::wstring header, std::wstring& addInName, std::wstrin
 	{
 		createSandboxedAppDomain = L"";
 		hr = S_OK;
+	}
+
+	std::wstring cancelAddInIsolationValue;
+	hr = GetAttributeValue(rootTag, L"Unsafe_CancelAddInIsolation_Unsafe", cancelAddInIsolationValue);
+	if (FAILED(hr))
+	{
+		// Parse error
+		return E_FAIL;
+	}
+	if (hr == S_FALSE)
+	{
+		cancelAddInIsolation = false;
+		hr = S_OK;
+	}
+	else // attribute read OK
+	{
+		if (CompareNoCase(cancelAddInIsolationValue, L"true") == 0)
+			cancelAddInIsolation = true;
+		else
+			cancelAddInIsolation = false;
 	}
 
 	hr = GetAttributeValue(rootTag, L"Name", addInName);
@@ -934,10 +960,14 @@ HRESULT GetDnaHeader(bool showErrors, std::wstring& header)
 	if (hResDna != NULL)
 	{
 		HGLOBAL hDna = LoadResource(hModuleCurrent, hResDna);
-		DWORD sizeDna = SizeofResource(hModuleCurrent, hResDna);
 		void* pDna = LockResource(hDna);
+		DWORD sizeDna = SizeofResource(hModuleCurrent, hResDna);
+
 		headerLength = min(sizeDna, MAX_HEADER_LENGTH);
-		CopyMemory(headerBuffer, pDna, headerLength);
+		SafeByteArray dnaBytes(pDna, headerLength);
+
+		void* pData = ((LPSAFEARRAY)dnaBytes)->pvData;
+		CopyMemory(headerBuffer, pData, headerLength);
 	}
 	else
 	{
@@ -986,7 +1016,7 @@ HRESULT GetDnaHeader(bool showErrors, std::wstring& header)
 	}
 	else
 	{
-		header = std::wstring((wchar_t*)headerBuffer, headerLength);
+		header = std::wstring((wchar_t*)headerBuffer, headerLength / 2);
 	}
 	return S_OK;
 }

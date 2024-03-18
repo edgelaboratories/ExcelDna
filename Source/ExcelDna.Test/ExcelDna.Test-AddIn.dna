@@ -1,0 +1,3 @@
+﻿<DnaLibrary Name="Test .NET 6 add-in" >
+  <ExternalLibrary Path="ExcelDna.Test.dll" Pack="true" />
+</DnaLibrary>

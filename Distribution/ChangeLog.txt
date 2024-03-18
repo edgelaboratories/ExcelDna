@@ -1,13 +1,34 @@
-Version 1.2 (???)
------------------
-* Target .NET Framework 4.5 or later only
+Version 1.6.1 (????)
+--------------------
+* Support building and packing on Linux build machine, using AsmResolver
+* Initial support for add-in reloading under .NET 6
+* Disable encoding and compression for packed add-ins
+* Update pack task output to use buid logging (thanks to @9swampy)
+
+Version 1.6.0 (1 October 2022)
+------------------------------
+* Encode packed files to reduce AV false positives
+* Support for SDK-style project files / PackageReference
+* Preview of .NET 6 support (.net6.0-windows TargetFramework)
+* Optionally disable ExcelDnaPack compression (thanks to @Phundamentals)
+* Remove support for http-based assembly retrieval
+
+Version 1.5.1 (22 December 2021)
+--------------------------------
+* Fix Excel crash when SynMacro runs on shutdown
+* Fix marshaling bug when double[,] is returned with object return type
+
+Version 1.5 (23 October 2021)
+-----------------------------
+* Target .NET Framework 4.52 or later only
 * Target Excel 2007 or later only
 * Improve registration performance
 * Allow registration with LambdaExpressions
 * Improve ExcelDnaPack error handling (thanks to @augustoproiete)
 * Remove ExcelServer support
 * Add workaround for McAfee registry security bug blocking COM registration
-* Defer AutoOpen and ribbon loading until Application object (first Workbook) is created 
+* Ignore registry key delete errors that occur in some virtualised environments
+* Improve IsFunctionWizard check (thanks @iitegrat)
 
 Version 1.1 (28 June 2020)
 --------------------------

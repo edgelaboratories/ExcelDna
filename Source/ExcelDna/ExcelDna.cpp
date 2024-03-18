@@ -5,20 +5,10 @@
 #include "ExcelDna.h"
 #include "ExcelDnaLoader.h"
 #include "MiscUtils.h"
+#include "LPenHelper.h"
 
 // Minimal parts of XLOPER types, 
 // used only for xlAddInManagerInfo(12). Really.
-struct XLOPER
-{
-	union
-	{
-		double num;					/* xltypeNum */
-		void* str;					/* xltypeStr */
-		WORD err;					/* xltypeErr */
-	} val;
-	WORD xltype; // Should be at offset 8 bytes
-};
-
 struct XLOPER12
 {
 	union
@@ -49,7 +39,7 @@ bool removed = false;    // Used to check whether AutoRemove is called before Au
 bool autoOpened = false; // Not set when loaded for COM server only. Used for re-open check.
 
 // The actual thunk table 
-extern "C" 
+extern "C"
 {
 	PFN thunks[EXPORT_COUNT];
 }
@@ -57,12 +47,11 @@ extern "C"
 XlAddInExportInfo* CreateExportInfo()
 {
 	pExportInfo = new XlAddInExportInfo();
-	pExportInfo->ExportInfoVersion = 8;
+	pExportInfo->ExportInfoVersion = 10;
 	pExportInfo->AppDomainId = -1;
 	pExportInfo->pXlAutoOpen = NULL;
 	pExportInfo->pXlAutoClose = NULL;
 	pExportInfo->pXlAutoRemove = NULL;
-	pExportInfo->pXlAutoFree = NULL;
 	pExportInfo->pXlAutoFree12 = NULL;
 	pExportInfo->pSetExcel12EntryPt = NULL;
 	pExportInfo->pDllRegisterServer = NULL;
@@ -73,6 +62,7 @@ XlAddInExportInfo* CreateExportInfo()
 	pExportInfo->pRegistrationInfo = NULL;
 	pExportInfo->pCalculationCanceled = NULL;
 	pExportInfo->pCalculationEnded = NULL;
+	pExportInfo->pLPenHelper = LPenHelper;
 	pExportInfo->ThunkTableLength = EXPORT_COUNT;
 	pExportInfo->ThunkTable = (PFN*)thunks;
 	return pExportInfo;
@@ -92,7 +82,7 @@ short EnsureInitialized()
 		result = XlLibraryInitialize(pExportInfoTemp);
 		if (result)
 		{
-			pExportInfo	= pExportInfoTemp;
+			pExportInfo = pExportInfoTemp;
 		}
 	}
 	return result;
@@ -133,10 +123,10 @@ void UnlockModule()
 }
 
 // Standard DLL entry point.
-BOOL __stdcall DllMain( HMODULE hModule,
-						DWORD  ul_reason_for_call,
-						LPVOID lpReserved
-						)
+BOOL __stdcall DllMain(HMODULE hModule,
+	DWORD  ul_reason_for_call,
+	LPVOID lpReserved
+)
 {
 	switch (ul_reason_for_call)
 	{
@@ -172,7 +162,7 @@ extern "C"
 			xlAutoClose();
 		}
 
-		if (EnsureInitialized() && 
+		if (EnsureInitialized() &&
 			pExportInfo->pXlAutoOpen != NULL)
 		{
 			result = pExportInfo->pXlAutoOpen();
@@ -190,7 +180,7 @@ extern "C"
 	short __stdcall xlAutoClose()
 	{
 		short result = 0;
-		if (EnsureInitialized() && 
+		if (EnsureInitialized() &&
 			pExportInfo->pXlAutoClose != NULL)
 		{
 			result = pExportInfo->pXlAutoClose();
@@ -212,7 +202,7 @@ extern "C"
 		}
 		return result;
 	}
-	
+
 	// Since v0.29 loading is much more expensive, so I want to reduce the number of times we load.
 	// We've never used or exposed xlAutoAdd to Excel-DNA addins, so no harm in disabling for now.
 	// To add back, also uncomment in the ExcelDna.def file.
@@ -230,7 +220,7 @@ extern "C"
 	short __stdcall xlAutoRemove()
 	{
 		short result = 0;
-		if (EnsureInitialized() && 
+		if (EnsureInitialized() &&
 			pExportInfo->pXlAutoRemove != NULL)
 		{
 			result = pExportInfo->pXlAutoRemove();
@@ -240,49 +230,12 @@ extern "C"
 		return result;
 	}
 
-	void __stdcall xlAutoFree(void* pXloper)
-	{
-		if (pExportInfo != NULL && pExportInfo->pXlAutoFree != NULL)
-		{
-			pExportInfo->pXlAutoFree(pXloper);
-		}
-	}
-
 	void __stdcall xlAutoFree12(void* pXloper12)
 	{
 		if (pExportInfo != NULL && pExportInfo->pXlAutoFree12 != NULL)
 		{
 			pExportInfo->pXlAutoFree12(pXloper12);
 		}
-	}
-
-	XLOPER* __stdcall xlAddInManagerInfo(XLOPER* pXloper)
-	{
-		static XLOPER result;
-		static char name[256];
-
-		// Return error by default
-		result.xltype = xltypeErr;
-		result.val.err = xlerrValue;
-
-		if (pXloper->xltype == 1 && pXloper->val.num == 1.0)
-		{
-			std::wstring addInNameW;
-			HRESULT hr = GetAddInName(addInNameW);
-			if (!FAILED(hr))
-			{
-				std::string addInName(addInNameW.begin(), addInNameW.end());
-				byte length = (byte)min(addInName.length(), 254);
-				name[0] = (char)length;
-				char* pName = (char*)name + 1;
-				strncpy_s(pName, 255, addInName.c_str(), length + 1);
-
-				result.xltype = xltypeStr;
-				result.val.str = name;
-			}
-		}
-
-		return &result;
 	}
 
 	XLOPER12* __stdcall xlAddInManagerInfo12(XLOPER12* pXloper)
@@ -316,7 +269,7 @@ extern "C"
 	// Support for Excel 2010 SDK - used when loading under HPC XLL Host
 	void __stdcall SetExcel12EntryPt(void* pexcel12New)
 	{
-		if (EnsureInitialized() && 
+		if (EnsureInitialized() &&
 			pExportInfo->pSetExcel12EntryPt != NULL)
 		{
 			pExportInfo->pSetExcel12EntryPt(pexcel12New);
@@ -327,7 +280,7 @@ extern "C"
 	HRESULT __stdcall DllRegisterServer()
 	{
 		HRESULT result = E_UNEXPECTED;
-		if (EnsureInitialized() && 
+		if (EnsureInitialized() &&
 			pExportInfo->pDllRegisterServer != NULL)
 		{
 			result = pExportInfo->pDllRegisterServer();
@@ -338,20 +291,20 @@ extern "C"
 	HRESULT __stdcall DllUnregisterServer()
 	{
 		HRESULT result = E_UNEXPECTED;
-		if (EnsureInitialized() && 
+		if (EnsureInitialized() &&
 			pExportInfo->pDllUnregisterServer != NULL)
 		{
 			result = pExportInfo->pDllUnregisterServer();
 		}
 		return result;
 	}
-	
+
 	HRESULT __stdcall DllGetClassObject(REFCLSID clsid, REFIID iid, void** ppv)
 	{
 		HRESULT result = E_UNEXPECTED;
 		GUID cls = clsid;
 		GUID i = iid;
-		if (EnsureInitialized() && 
+		if (EnsureInitialized() &&
 			pExportInfo->pDllGetClassObject != NULL)
 		{
 
@@ -365,7 +318,7 @@ extern "C"
 		// CONSIDER: This caused problems for unloaded add-ins, when shutting Excel down.
 		//           We need to add a flag that tracks whether the add-in has beren unloaded.
 		//           Always returning FALSE is what was happening internally anyway, so we're no worse off than before.
-		
+
 		//HRESULT result = S_OK;
 		//if (EnsureInitialized() &&
 		//	pExportInfo->pDllCanUnloadNow != NULL)
@@ -379,26 +332,26 @@ extern "C"
 
 	void __stdcall SyncMacro(double param)
 	{
-		if (EnsureInitialized() && 
+		if (EnsureInitialized() &&
 			pExportInfo->pSyncMacro != NULL)
 		{
 			pExportInfo->pSyncMacro(param);
 		}
 	}
 
-    XLOPER12* __stdcall RegistrationInfo(XLOPER12* param)
-    {
-        if (EnsureInitialized() && 
+	XLOPER12* __stdcall RegistrationInfo(XLOPER12* param)
+	{
+		if (EnsureInitialized() &&
 			pExportInfo->pRegistrationInfo != NULL)
 		{
 			return (XLOPER12*)pExportInfo->pRegistrationInfo(param);
 		}
-        return NULL;
-    }
+		return NULL;
+	}
 
 	void __stdcall CalculationCanceled()
 	{
-		if (EnsureInitialized() && 
+		if (EnsureInitialized() &&
 			pExportInfo->pCalculationCanceled != NULL)
 		{
 			pExportInfo->pCalculationCanceled();
@@ -407,7 +360,7 @@ extern "C"
 
 	void __stdcall CalculationEnded()
 	{
-		if (EnsureInitialized() && 
+		if (EnsureInitialized() &&
 			pExportInfo->pCalculationEnded != NULL)
 		{
 			pExportInfo->pCalculationEnded();

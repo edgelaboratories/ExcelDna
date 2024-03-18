@@ -10,7 +10,7 @@ namespace ExcelDna.Loader
     static class IntegrationLoader
     {
         // This version must match the version declared in ExcelDna.Integration.ExcelIntegration
-        const int ExcelIntegrationVersion = 11;
+        const int ExcelIntegrationVersion = 12;
         public static void LoadIntegration()
         {
             ExcelIntegration.ConfigureHost(new IntegrationHost());
@@ -31,8 +31,12 @@ namespace ExcelDna.Loader
             => XlCallImpl.TryExcelImpl(xlFunction, out result, parameters);
 
         public byte[] GetResourceBytes(string resourceName, int type)
-            => AssemblyManager.GetResourceBytes(resourceName, type);
+            => XlAddIn.GetResourceBytes(resourceName, type);
 
+        public Assembly LoadFromAssemblyPath(string assemblyPath)
+            => XlAddIn.LoadAssemblyFromPath(assemblyPath);
+        public Assembly LoadFromAssemblyBytes(byte[] assemblyBytes, byte[] pdbBytes)
+            => XlAddIn.LoadAssemblyFromBytes(assemblyBytes, pdbBytes);
         public void RegisterMethods(List<MethodInfo> methods)
             => XlRegistration.RegisterMethods(methods);
 
@@ -47,5 +51,7 @@ namespace ExcelDna.Loader
 
         public void RegisterRtdWrapper(string progId, object rtdWrapperOptions, object functionAttribute, List<object> argumentAttributes)
             => XlRegistration.RegisterRtdWrapper(progId, rtdWrapperOptions, functionAttribute, argumentAttributes);
+
+        public int LPenHelper(int wCode, ref XlCall.FmlaInfo fmlaInfo) => XlAddIn.LPenHelper(wCode, ref fmlaInfo);
     }
 }

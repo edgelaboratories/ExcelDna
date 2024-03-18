@@ -9,7 +9,6 @@ using System.Runtime.InteropServices;
 using System.Xml.Serialization;
 using System.Xml;
 using System.Drawing;
-using System.Net;
 
 using ExcelDna.Serialization;
 using ExcelDna.Integration.CustomUI;
@@ -140,6 +139,14 @@ namespace ExcelDna.Integration
         {
             get { return _DefaultImports; }
             set { _DefaultImports = value; }
+        }
+
+        private bool _DisableAssemblyContextUnload = false;
+        [XmlAttribute]
+        public bool DisableAssemblyContextUnload
+        {
+            get { return _DisableAssemblyContextUnload; }
+            set { _DisableAssemblyContextUnload = value; }
         }
 
         // No ExplicitExports flag on the DnaLibrary (for now), because it might cause confusion when mixed with ExternalLibraries.
@@ -279,30 +286,10 @@ namespace ExcelDna.Integration
         // Only called for the Root DnaLibrary.
         internal void AutoOpen()
         {
-            SynchronizationManager.Install(true);
-
-            if (ExcelDnaUtil.GetApplicationNotProtectedNoThrow() != null)
-            {
-                // Proceed without undue delay
-                AutoOpenImpl();
-            }
-            else
-            {
-                // Some possibilities that get us here:
-                // * Can't get Application object at all - first time we're trying is here, no workbook open and hence C API is needed but not available
-                // * Excel is shutting down (would have abandoned in the past, now we keep re-trying)
-
-                // We defer the rest of the load until we have an Application object...
-                ExcelAsyncUtil.QueueAsMacro(AutoOpenImpl);
-            }
-        }
-
-        // Runs from the QueueAsMacro, once Application exists
-        void AutoOpenImpl()
-        {
             // Register special RegistrationInfo function
             RegistrationInfo.Register();
-            // Register my methods
+            SynchronizationManager.Install(true);
+            // Register my Methods
             ExcelIntegration.RegisterMethods(_methods);
 
             // Invoke AutoOpen in all assemblies
@@ -310,12 +297,17 @@ namespace ExcelDna.Integration
             {
                 try
                 {
-                    addIn.Instance = Activator.CreateInstance(addIn.InstanceType);
-
                     if (addIn.AutoOpenMethod != null)
                     {
                         addIn.AutoOpenMethod.Invoke(addIn.Instance, null);
                     }
+                }
+                catch (TargetInvocationException e)
+                {
+                    if (e.InnerException != null)
+                        Logger.Initialization.Error(e.InnerException, "DnaLibrary AutoOpen Invoke Error");
+                    else
+                        Logger.Initialization.Error("DnaLibrary AutoOpen Invoke Error: {0}", e.Message);
                 }
                 catch (Exception e)
                 {
@@ -336,10 +328,17 @@ namespace ExcelDna.Integration
             {
                 try
                 {
-                    if (addIn.AutoCloseMethod != null && addIn.Instance != null)
+                    if (addIn.AutoCloseMethod != null)
                     {
                         addIn.AutoCloseMethod.Invoke(addIn.Instance, null);
                     }
+                }
+                catch (TargetInvocationException e)
+                {
+                    if (e.InnerException != null)
+                        Logger.Initialization.Warn("DnaLibrary AutoClose Invoke Error: {0}", e.InnerException.Message);
+                    else
+                        Logger.Initialization.Warn("DnaLibrary AutoClose Invoke Error: {0}", e.Message);
                 }
                 catch (Exception e)
                 {
@@ -354,9 +353,6 @@ namespace ExcelDna.Integration
 
         internal void LoadCustomUI()
         {
-            // Load any old-style menus from ExcelCommand attributes
-            MenuManager.LoadCustomUI();
-
             bool uiLoaded = false;
             if (ExcelDnaUtil.ExcelVersion >= 12.0)
             {
@@ -479,30 +475,6 @@ namespace ExcelDna.Integration
             // Called to shut down the Add-In.
             // Free whatever possible
             rootLibrary = null;
-        }
-
-        public static DnaLibrary LoadFrom(Uri uri)
-        {
-            DnaLibrary dnaLibrary;
-            XmlSerializer serializer = new DnaLibrarySerializer();
-
-            // The uri might be file or http.
-            try
-            {
-                WebRequest req = WebRequest.CreateDefault(uri);
-                WebResponse res = req.GetResponse();
-                Stream s = res.GetResponseStream();
-                dnaLibrary = (DnaLibrary)serializer.Deserialize(s);
-            }
-            catch (Exception e)
-            {
-                Logger.Initialization.Error("There was an error in loading the .dna file from a Uri:\r\n{0}\r\n{1}\r\nUri:{2}", e.Message, e.InnerException != null ? e.InnerException.Message : string.Empty, uri.ToString());
-                return null;
-            }
-
-            dnaLibrary.dnaResolveRoot = null;
-            return dnaLibrary;
-
         }
 
         public static DnaLibrary LoadFrom(byte[] bytes, string pathResolveRoot)

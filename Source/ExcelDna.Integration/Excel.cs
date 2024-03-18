@@ -287,10 +287,50 @@ namespace ExcelDna.Integration
             // Don't cache the one we get from the Window, it keeps Excel alive! 
             // (?? Really ?? - Probably only when we're not on the main thread...)
             object application = GetApplicationFromWindows(allowProtected, out isProtected);
-            if (application != null)
-                return application;
+            if (application != null) return application;
 
-            throw new InvalidOperationException("Application object is not available");
+            // DOCUMENT: Under some circumstances, the C API and Automation interfaces are not available.
+            //  This happens when there is no Workbook open in Excel.
+            // Now make workbook with VBA sheet, according to some Google post.
+
+            // We try a (possible) test for whether we can call the C API.
+            if (!IsExcelApiAvailable())
+            {
+                throw new InvalidOperationException("Excel API is unavailable - cannot retrieve Application object.");
+            }
+
+            return GetApplicationFromNewWorkbook(allowProtected, out isProtected);
+        }
+
+        private static object GetApplicationFromNewWorkbook(bool allowProtected, out bool isProtected)
+        {
+            // Create new workbook with the right stuff
+            // Echo calls removed for Excel 2013 - this caused trouble in the Excel 2013 'browse' scenario.
+            object application;
+            bool isExcelPre15 = SafeIsExcelVersionPre15;
+            if (isExcelPre15) XlCall.Excel(XlCall.xlcEcho, false);
+            try
+            {
+                XlCall.Excel(XlCall.xlcNew, 5);
+                XlCall.Excel(XlCall.xlcWorkbookInsert, 6);
+
+                // Try again
+                application = GetApplicationFromWindows(allowProtected, out isProtected);
+
+                XlCall.Excel(XlCall.xlcFileClose, false);
+            }
+            catch
+            {
+                // Not expecting this ever - but be consistent about Try vs. exceptions
+                application = null;
+                isProtected = false;
+            }
+            finally
+            {
+                if (isExcelPre15) XlCall.Excel(XlCall.xlcEcho, true);
+            }
+
+            return application; // Might be null in a bad case, but we have no further ideas
         }
 
         // internal implementation that does not throw in the case where the C API is unavailable,
@@ -318,11 +358,23 @@ namespace ExcelDna.Integration
                 return application;
             }
 
-            return null;
+            // We try a (possible) test for whether we can call the C API.
+            if (!IsExcelApiAvailable())
+            {
+                return null;
+            }
 
-            // GvD 2021/02/08 - Removed the NewWorkbook approach - it seems unstable and not helpful to try to force things during startup,
-            // and has the Book2 problem.
-            // CONSIDER: Maybe add an option to force the load from an add-in?
+            // We can call the C API - use it to make a new workbook and then get the Application through there
+            application = GetApplicationFromNewWorkbook(false, out isProtected);
+            if (application != null && isProtected)
+            {
+                // (We don't expect it to ever be protected in this case...)
+                Debug.Fail("Unexpected protected Application from GetApplicationFromNewWorkbook");
+                // Can't return this Application
+                return null;
+            }
+            _application = application; // Still null due to unexpected failure, or else valid, not protected, and thus safe to cache
+            return application;
         }
 
         static object GetApplicationFromWindows(bool allowProtected, out bool isProtected)
@@ -490,27 +542,57 @@ namespace ExcelDna.Integration
             return inFunctionWizard;
         }
 
+        struct FuncWizChild {
+            public int ScrollBar;
+            public int EDTBX;
+        };
+
         static bool IsFunctionWizardWindow(IntPtr hWnd, StringBuilder buffer)
         {
             buffer.Length = 0;
             // Check the window class
-            GetClassNameW(hWnd, buffer, buffer.Capacity);
+            if (GetClassNameW(hWnd, buffer, buffer.Capacity) == 0)
+              return false;
             if (!buffer.ToString().StartsWith("bosa_sdm_XL"))
                 return false;
 
-            buffer.Length = 0;
-            GetWindowTextW(hWnd, buffer, buffer.Capacity);
-            string title = buffer.ToString();
-            // Another window that has been reported as causing issue has title "Collect and Paste 2.0"
-            if (title.Contains("Replace") || title.Contains("Paste") || title.Contains("Recovery"))
-                return false;
+            FuncWizChild child = new FuncWizChild { ScrollBar = 0, EDTBX = 0 };
+            EnumChildWindows(hWnd, delegate (IntPtr hWndEnum, IntPtr param)
+            {
+                buffer.Length = 0;
+                if (GetClassNameW(hWndEnum, buffer, buffer.Capacity) == 0)
+                    return false;
 
-            return true;
+                string title = buffer.ToString();
+                if (title.Equals("EDTBX"))
+                    child.EDTBX++;
+                else if (title.Equals("ScrollBar"))
+                    child.ScrollBar++;
+                else
+                    return false;
+
+                return true;
+            }, IntPtr.Zero);
+
+            if (child.ScrollBar == 1 && child.EDTBX == 5)
+              return true;
+
+            return false;
         }
         #endregion
 
-        #region Version Helpers
-        // This version is used internally - it seems a bit safer than the API calls.
+        #region IsInFormualEditMode
+        public static bool IsInFormulaEditMode()
+        {
+            if (!IsMainThread)
+                throw new InvalidOperationException("IsInFormulaEditMode can only be called from the main thread.");
+
+            return RunMacroSynchronization.IsInFormulaEditMode();
+        }
+        #endregion
+
+            #region Version Helpers
+            // This version is used internally - it seems a bit safer than the API calls.
         private static FileVersionInfo _excelExecutableInfo = null;
         internal static FileVersionInfo ExcelExecutableInfo
         {
