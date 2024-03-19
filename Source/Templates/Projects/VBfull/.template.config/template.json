@@ -1,0 +1,14 @@
+{
+    "$schema": "http://json.schemastore.org/template",
+    "author": "Govert van Drimmelen",
+    "classifications": [ "Excel", "Add-in" ],
+    "groupIdentity": "ExcelDna.FullProject",
+    "identity": "ExcelDna.VBFullProject",
+    "sourceName": "VBfull",
+    "name": "Excel-DNA full-featured add-in",
+    "shortName": "exceladdin",
+    "tags": {
+        "language": "VB",
+        "type": "project"
+    }
+}

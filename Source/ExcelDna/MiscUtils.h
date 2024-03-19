@@ -41,6 +41,8 @@ public:
 	SafeByteArray(void* data, int sizeInBytes);
 	~SafeByteArray();
 	operator LPSAFEARRAY() { return pArray; }
+	int AccessData(byte** ppData);
+	void UnaccessData();
 private:
 	LPSAFEARRAY pArray;
 };
@@ -75,3 +77,4 @@ private:
 };
 
 std::wstring UTF8toUTF16(const std::string& utf8);
+

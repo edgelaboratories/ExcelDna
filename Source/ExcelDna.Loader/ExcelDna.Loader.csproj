@@ -1,8 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    
-    <TargetFramework>net452</TargetFramework>
+
+    <TargetFrameworks>net452;net6.0-windows</TargetFrameworks>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
     <AssemblyTitle>ExcelDna Managed Loader</AssemblyTitle>
@@ -13,10 +13,6 @@
 
 
   </PropertyGroup>
-
-  <ItemGroup>
-    <Compile Include="..\Lzma\**\*.cs" LinkBase="Lzma"/>
-  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\ExcelDna.Integration\ExcelDna.Integration.csproj" />

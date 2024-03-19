@@ -22,6 +22,9 @@ namespace ExcelDna.AddIn.Tasks.Utils
 
         public void CopyFile(string sourceFileName, string destFileName, bool overwrite)
         {
+            if (string.Equals(Path.GetFullPath(sourceFileName), Path.GetFullPath(destFileName), StringComparison.OrdinalIgnoreCase))
+                return;
+
             if (overwrite)
             {
                 var destFileInfo = new FileInfo(destFileName);
@@ -47,6 +50,11 @@ namespace ExcelDna.AddIn.Tasks.Utils
                     outputStream.Write(buffer, 0, bytesRead);
                 } while (bytesRead == bufferSize);
             }
+        }
+
+        public void WriteFile(string sourceText, string destinationFileName)
+        {
+            File.WriteAllText(destinationFileName, sourceText);
         }
 
         public void DeleteFile(string sourceFileName)

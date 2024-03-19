@@ -2,7 +2,6 @@
 //  Excel-DNA is licensed under the zlib license. See LICENSE.txt for details.
 
 using System;
-using System.Configuration;
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -247,7 +246,14 @@ namespace ExcelDna.ComInterop.ComRegistration
                     return false;
                 }
 
-                classesKey.DeleteSubKey(testKeyName); // GvD 2020/06/24 Started failing here with UnauthorizedAccess when elevated !?
+                try
+                {
+                    classesKey.DeleteSubKey(testKeyName);
+                }
+                catch (Exception ex)
+                {
+                    Logger.ComAddIn.Info("RegistrationUtil.CanWriteMachineHive - DeleteSubKey failed - ignoring exception {0}: {1}", ex.GetType().Name, ex.Message);
+                }
                 Logger.ComAddIn.Verbose("RegistrationUtil.CanWriteMachineHive - returning True");
 
                 // Looks fine, even though it might well be virtualized to some part of the user hive.
@@ -295,7 +301,14 @@ namespace ExcelDna.ComInterop.ComRegistration
                     return false;
                 }
 
-                classesKey.DeleteSubKeyTree(testKeyName);
+                try
+                {
+                    classesKey.DeleteSubKeyTree(testKeyName);
+                }
+                catch (Exception ex)
+                {
+                    Logger.ComAddIn.Info("RegistrationUtil.CanWriteUserHive - DeleteSubKey failed - ignoring exception {0}: {1}", ex.GetType().Name, ex.Message);
+                }
                 Logger.ComAddIn.Verbose("RegistrationUtil.CanWriteUserHive - True");
 
                 // Looks fine, even though it might well be virtualized to some part of the user hive.
@@ -329,7 +342,14 @@ namespace ExcelDna.ComInterop.ComRegistration
         public static void UsersDeleteSubKey(string subkey)
         {
             Logger.ComAddIn.Verbose("RegistrationUtil.UsersDeleteSubKey({0})", subkey);
-            Registry.Users.DeleteSubKey(subkey);
+            try
+            {
+                Registry.Users.DeleteSubKey(subkey);
+            }
+            catch (Exception ex)
+            {
+                Logger.ComAddIn.Info("UsersDeleteSubKey - DeleteSubKey failed - ignoring exception {0}: {1}", ex.GetType().Name, ex.Message);
+            }
         }
 
         public static void KeySetValue(RegistryKey key, string name, object value, RegistryValueKind valueKind)
@@ -341,7 +361,14 @@ namespace ExcelDna.ComInterop.ComRegistration
         public static void DeleteSubKeyTree(RegistryKey key, string subkey)
         {
             Logger.ComAddIn.Verbose("RegistrationUtil.DeleteSubKeyTree({0}, {1})", key.Name, subkey);
-            key.DeleteSubKeyTree(subkey);
+            try
+            {
+                key.DeleteSubKeyTree(subkey);
+            }
+            catch (Exception ex)
+            {
+                Logger.ComAddIn.Info("DeleteSubKeyTree - DeleteSubKeyTree failed - ignoring exception {0}: {1}", ex.GetType().Name, ex.Message);
+            }
         }
 
         public static void SetValue(string keyName, string valueName, object value, RegistryValueKind valueKind)
@@ -349,21 +376,6 @@ namespace ExcelDna.ComInterop.ComRegistration
             Logger.ComAddIn.Verbose("RegistrationUtil.SetValue({0}, {1}, {2}, {3})", keyName, valueName, value.ToString(), valueKind.ToString());
             Registry.SetValue(keyName, valueName, value, valueKind);
         }
-
-        // Helper for AppSettings (can move somewhere later)
-        static bool AppSettingsFlag(string key)
-        {
-            var value = ConfigurationManager.AppSettings[key];
-            if (value == null)
-                return false;
-            
-            bool flag;
-            if (bool.TryParse(value, out flag))
-                return flag;
-
-            return false;
-        }
-
     }
 
     // Disposable base class

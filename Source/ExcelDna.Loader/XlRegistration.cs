@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using ExcelDna.Integration;
 using ExcelDna.Loader.Logging;
 
@@ -15,14 +16,16 @@ namespace ExcelDna.Loader
     public static class XlRegistration
     {
         static readonly List<XlMethodInfo> registeredMethods = new List<XlMethodInfo>();
+        static readonly HashSet<string> registeredNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // Optimization for our logging check
         static readonly List<string> addedShortCuts = new List<string>();
-        
+        static readonly List<GCHandle> delegateHandles = new List<GCHandle>();
+
         // This list is just to give access to the registration details for UI enhancement.
         // Each entry corresponds exactly to the xlfRegister call (except first entry with xllPath is cleared) 
         // - max length of each array is 255.
         static readonly List<object[]> registrationInfo = new List<object[]>();
         static double registrationInfoVersion = 0.0; // Incremented every time the registration changes, used by GetRegistrationInfo to short-circuit.
-        
+
         public static void RegisterMethods(List<MethodInfo> methods)
         {
             List<object> methodAttributes;
@@ -83,7 +86,7 @@ namespace ExcelDna.Loader
                      null,
                      new List<object> { functionAttribute },
                      new List<List<object>> { argumentAttributes });
-            RegisterXlMethods(xlMethods); 
+            RegisterXlMethods(xlMethods);
         }
 
         // This function provides access to the registration info from an IntelliSense provider.
@@ -128,7 +131,7 @@ namespace ExcelDna.Loader
 
             // Sort by name in reverse order before registering - this is inspired by the article http://www.benf.org/excel/regcost/
             // Makes a small but measurable difference in the Excel registration calls
-            xlMethods.Sort(delegate (XlMethodInfo mi1, XlMethodInfo mi2) { return -string.CompareOrdinal(mi1.Name.ToLower(), mi2.Name.ToLower()); });
+            xlMethods.Sort((XlMethodInfo mi1, XlMethodInfo mi2) => -StringComparer.OrdinalIgnoreCase.Compare(mi1.Name, mi2.Name));
             xlMethods.ForEach(RegisterXlMethod);
             // Increment the registration version (safe to call a few times)
             registrationInfoVersion += 1.0;
@@ -136,38 +139,42 @@ namespace ExcelDna.Loader
 
         static void RegisterXlMethod(XlMethodInfo mi)
         {
+            delegateHandles.Add(mi.DelegateHandle);
+
             int index = registeredMethods.Count;
             XlAddIn.SetJump(index, mi.FunctionPointer);
             string exportedProcName = string.Format("f{0}", index);
 
             object[] registerParameters = GetRegisterParameters(mi, exportedProcName);
+            string registerName = (string)registerParameters[3];
 
-            if (registrationInfo.Exists(ri => ((string)ri[3]).Equals((string)registerParameters[3], StringComparison.OrdinalIgnoreCase)))
+            if (!registeredNames.Add(registerName))
             {
+                // Not added to the set of names, so it was already present
                 // This function will be registered with a name that has already been used (by this add-in)
                 if (mi.SuppressOverwriteError)
                 {
                     // Logged at Info level - to allow re-registration without error popup
-                    Logger.Registration.Info("Repeated function name: '{0}' - previous registration will be overwritten. ", registerParameters[3]);
+                    Logger.Registration.Info("Repeated function name: '{0}' - previous registration will be overwritten. ", registerName);
                 }
                 else
                 {
                     // This logged as an error, but the registration continues - the last function with the name wins, for backward compatibility.
-                    Logger.Registration.Error("Repeated function name: '{0}' - previous registration will be overwritten. ", registerParameters[3]);
+                    Logger.Registration.Error("Repeated function name: '{0}' - previous registration will be overwritten. ", registerName);
                 }
             }
-            
+
             // Basically suppress problems here !?
             try
             {
                 object xlCallResult;
                 XlCallImpl.TryExcelImpl(XlCallImpl.xlfRegister, out xlCallResult, registerParameters);
                 Logger.Registration.Info("Register - XllPath={0}, ProcName={1}, FunctionType={2}, Name={3} - Result={4}",
-                            registerParameters[0], registerParameters[1], registerParameters[2], registerParameters[3],
+                            registerParameters[0], registerParameters[1], registerParameters[2], registerName,
                             xlCallResult);
                 if (xlCallResult is double)
                 {
-                    mi.RegisterId = (double) xlCallResult;
+                    mi.RegisterId = (double)xlCallResult;
                     registeredMethods.Add(mi);
                     if (mi.IsCommand)
                     {
@@ -226,6 +233,9 @@ namespace ExcelDna.Loader
             }
             registeredMethods.Clear();
             registrationInfo.Clear();
+
+            delegateHandles.ForEach(i => i.Free());
+            delegateHandles.Clear();
         }
 
         static void RegisterMenu(XlMethodInfo mi)

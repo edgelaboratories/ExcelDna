@@ -67,10 +67,23 @@ SafeByteArray::SafeByteArray(void* data, int sizeInBytes)
 	memcpy(pArray->pvData, data, sizeInBytes);
 	SafeArrayUnlock(pArray);
 }
+
 SafeByteArray::~SafeByteArray()
 {
 	SafeArrayDestroy(pArray);
 }
+
+int SafeByteArray::AccessData(byte** ppData)
+{
+	SafeArrayAccessData(pArray, (void**)ppData);
+	return pArray->rgsabound->cElements;
+}
+
+void SafeByteArray::UnaccessData()
+{
+	SafeArrayUnaccessData(pArray);
+}
+
 
 bool FileExists(LPCTSTR szPath)
 {
@@ -84,7 +97,7 @@ std::wstring LoadStringFromResource(HMODULE hModule, int id)
 {
 	const wchar_t* buffer = nullptr;
 	LoadStringW(hModule, id, (LPWSTR)&buffer, 0);//ugly cast for badly designed API (specifying buffer size == 0 returns a read only pointer.
-	return std::wstring(buffer, *((WORD*) buffer - 1));//The WORD preceding the address is the size of the resource string. which is not null-terminated.
+	return std::wstring(buffer, *((WORD*)buffer - 1));//The WORD preceding the address is the size of the resource string. which is not null-terminated.
 }
 
 std::wstring FormatString(std::wstring formatString, ...)

@@ -88,7 +88,7 @@ namespace ExcelDna.Integration
         {
             get
             {
-                if (_syncWindow != null && _syncWindow.RunMacroSynchronization.IsRegistered) 
+                if (_syncWindow != null && _syncWindow.RunMacroSynchronization.IsRegistered)
                     return _syncWindow.RunMacroSynchronization;
 
                 return null;
@@ -232,6 +232,11 @@ namespace ExcelDna.Integration
         // The timer is hooked on to the _syncWindow, and its WM_TIMER message received in the _syncWindow calls this function again.
         // TODO: Consider this discussion (maybe allow user to register callback to check other conditions before running): 
         //       https://exceldna.codeplex.com/discussions/565495
+
+        // Here we catch an InvalidOperationException that we throw from CallPenHelper below
+        // This seems to need the special attribute too !?
+        // TODO: NET6+: See notes at CallPenHelper
+        [HandleProcessCorruptedStateExceptions]
         public void ProcessRunSyncMacroMessage()
         {
             try
@@ -338,7 +343,7 @@ namespace ExcelDna.Integration
 
             object xlCallResult;
             XlCall.TryExcel(XlCall.xlfRegister, out xlCallResult, registerParameters);
-            Logger.Registration.Verbose("Register SyncMacro - XllPath={0}, ProcName={1}, FunctionType={2}, MethodName={3} - Result={4}", 
+            Logger.Registration.Verbose("Register SyncMacro - XllPath={0}, ProcName={1}, FunctionType={2}, MethodName={3} - Result={4}",
                 registerParameters[0], registerParameters[1], registerParameters[2], registerParameters[3], xlCallResult);
             if (xlCallResult is double)
             {
@@ -472,7 +477,7 @@ namespace ExcelDna.Integration
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         static extern IntPtr GetFocus();
-        
+
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
@@ -497,32 +502,13 @@ namespace ExcelDna.Integration
             return openMenuButton.Enabled;
         }
 
-        // The call to LPenHelper will cause an AccessViolation after Excel starts shutting down.
-        // NOTE .NET5+: If this assembly is run under .NET 5+ we need to re-engineer this call to handle possible access violations outside the managed code,
-        // or figure out the source and timing of safe vs dangerous calls.
-        // (Also for CheckExcelApiAvailable())
-
-        [HandleProcessCorruptedStateExceptions]
-        static int CallPenHelper(int wCode, ref XlCall.FmlaInfo fmlaInfo)
-        {
-            try
-            {
-                // (If Excel is shutting down, we see an Access Violation here, reading at 0x00000018.)
-                return XlCall.LPenHelper(XlCall.xlGetFmlaInfo, ref fmlaInfo);
-            }
-            catch (AccessViolationException ave)
-            {
-                throw new InvalidOperationException("LPenHelper call failed. Excel is shutting down.", ave);
-            }
-        }
-
-        static bool IsInFormulaEditMode()
+        public static bool IsInFormulaEditMode()
         {
             // check edit state directly
             var fmlaInfo = new XlCall.FmlaInfo();
 
-            // If Excel is shutting down, CallPenHelper will throw an InvalidOperationException.
-            var result = CallPenHelper(XlCall.xlGetFmlaInfo, ref fmlaInfo);
+            // If Excel is shutting down, PenHelper will throw an InvalidOperationException.
+            var result = XlCall.PenHelper(XlCall.xlGetFmlaInfo, ref fmlaInfo);
             if (result == 0)
             {
                 // Succeeded

@@ -38,17 +38,17 @@ namespace ExcelDna.Logging
     // The MIT License (MIT)
 
     // Copyright (c) Microsoft Corporation
-       
+
     // Permission is hereby granted, free of charge, to any person obtaining a copy 
     // of this software and associated documentation files (the "Software"), to deal 
     // in the Software without restriction, including without limitation the rights 
     // to use, copy, modify, merge, publish, distribute, sublicense, and/or sell 
     // copies of the Software, and to permit persons to whom the Software is 
     // furnished to do so, subject to the following conditions: 
-       
+
     // The above copyright notice and this permission notice shall be included in all 
     // copies or substantial portions of the Software. 
-       
+
     // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
     // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
     // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE 
@@ -64,7 +64,7 @@ namespace ExcelDna.Logging
     enum IntegrationTraceEventId
     {
         Initialization = 1,
-        DnaCompilation = 2, 
+        DnaCompilation = 2,
         Registration = 3,
         ComAddIn = 4,
         RtdServer = 5,
@@ -87,10 +87,12 @@ namespace ExcelDna.Logging
         {
             if (!s_LoggingInitialized)
             {
+                LoggingSettings settings = new LoggingSettings();
+
                 bool loggingEnabled = false;
                 // DOCUMENT: By default the TraceSource is configured to source only Warning, Error and Fatal.
                 //           the configuration can override this.
-                IntegrationTraceSource = new TraceSource(TraceSourceName, SourceLevels.Warning);
+                IntegrationTraceSource = new TraceSource(TraceSourceName, settings.SourceLevel);
 
                 bool logDisplayTraceListenerIsConfigured = false;
                 TraceListener logDisplayTraceListenerToRemove = null; // The one we want to remove if configured as "Off"
@@ -108,6 +110,10 @@ namespace ExcelDna.Logging
                             logDisplayTraceListenerToRemove = tl;
                         }
                         logDisplayTraceListenerIsConfigured = true;
+                    }
+                    else if (tl.Name == "Default" && settings.DebuggerLevel.HasValue)
+                    {
+                        tl.Filter = new DiagnosticsFilter(settings.DebuggerLevel.Value);
                     }
                 }
 
@@ -134,7 +140,17 @@ namespace ExcelDna.Logging
                     else
                     {
                         // No explicit configuration for this default listener, so we add it
-                        IntegrationTraceSource.Listeners.Add(new LogDisplayTraceListener("LogDisplay"));
+                        IntegrationTraceSource.Listeners.Add(new LogDisplayTraceListener("LogDisplay", settings.LogDisplayLevel));
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(settings.FileName))
+                    {
+                        Trace.AutoFlush = true;
+
+                        TextWriterTraceListener textWriterTraceListener = new TextWriterTraceListener(settings.FileName, "FileWriter");
+                        if (settings.FileLevel.HasValue)
+                            textWriterTraceListener.Filter = new DiagnosticsFilter(settings.FileLevel.Value);
+                        IntegrationTraceSource.Listeners.Add(textWriterTraceListener);
                     }
 
                     AppDomain currentDomain = AppDomain.CurrentDomain;
@@ -145,6 +161,12 @@ namespace ExcelDna.Logging
                 s_LoggingEnabled = loggingEnabled;
                 s_LoggingInitialized = true;
             }
+        }
+
+        public static void DeInitialize()
+        {
+            Close();
+            s_AppDomainShutdown = true;
         }
 
         static bool ValidateSettings(TraceSource traceSource, TraceEventType traceLevel)
@@ -168,13 +190,13 @@ namespace ExcelDna.Logging
             return true;
         }
 
-        static void ProcessExitEvent(object sender, EventArgs e) 
+        static void ProcessExitEvent(object sender, EventArgs e)
         {
             Close();
             s_AppDomainShutdown = true;
         }
 
-        private static void AppDomainUnloadEvent(object sender, EventArgs e) 
+        private static void AppDomainUnloadEvent(object sender, EventArgs e)
         {
             Close();
             s_AppDomainShutdown = true;
@@ -182,8 +204,17 @@ namespace ExcelDna.Logging
 
         static void Close()
         {
-            if (IntegrationTraceSource != null) 
+            AppDomain currentDomain = AppDomain.CurrentDomain;
+            currentDomain.DomainUnload -= AppDomainUnloadEvent;
+            currentDomain.ProcessExit -= ProcessExitEvent;
+
+            if (IntegrationTraceSource != null)
+            {
                 IntegrationTraceSource.Close();
+                IntegrationTraceSource = null;
+            }
+
+            s_LoggingInitialized = false;
         }
 
     }
